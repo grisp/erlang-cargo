@@ -24,5 +24,13 @@ jobs:
         toolchain: stable
     - name: Compile
       run: rebar3 compile
-    - name: Run tests
-      run: rebar3 do eunit, ct
+    - name: EUnit
+      run: rebar3 eunit
+    # libtest's JSON output is unstable; ordinary compilation stays on stable.
+    - uses: actions-rs/toolchain@v1
+      with:
+        toolchain: nightly
+    - name: Common Test
+      env:
+        RUSTUP_TOOLCHAIN: nightly
+      run: rebar3 ct

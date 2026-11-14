@@ -13,7 +13,13 @@
     release/1,
     release/2,
     target_dir/1,
-    target_dir/2
+    target_dir/2,
+    path/2,
+    features/1,
+    default_features/1,
+    library_types/1,
+    env/1,
+    rustflags/1
 ]).
 
 -record(opts, {
@@ -21,15 +27,25 @@
     release :: boolean(),
     toolchain :: binary() | undefined,
     target :: binary() | undefined,
-    target_dir :: binary() | undefined
+    target_dir :: binary() | undefined,
+    features :: [binary()],
+    default_features :: boolean(),
+    library_types :: [binary()],
+    env :: [{string(), string() | false}],
+    rustflags :: [binary()] | undefined
 }).
 
 -type params() :: #{
     path := file:name_all(),
-    release := boolean(),
-    toolchain := binary(),
-    target := binary(),
-    target_dir := binary()
+    release => boolean(),
+    toolchain => binary() | undefined,
+    target => binary() | undefined,
+    target_dir => binary() | undefined,
+    features => [binary()],
+    default_features => boolean(),
+    library_types => [binary()],
+    env => [{string(), string() | false}],
+    rustflags => [binary()] | undefined
 }.
 
 -opaque t() :: #opts{}.
@@ -48,7 +64,14 @@ new(Opts) ->
         release = Release,
         toolchain = Toolchain,
         target = Target,
-        target_dir = TargetDir
+        target_dir = TargetDir,
+        features = maps:get(features, Opts, []),
+        default_features = maps:get(default_features, Opts, true),
+        library_types = maps:get(library_types, Opts, [
+            <<"lib">>, <<"rlib">>, <<"cdylib">>, <<"staticlib">>, <<"dylib">>
+        ]),
+        env = maps:get(env, Opts, []),
+        rustflags = maps:get(rustflags, Opts, undefined)
     }.
 
 -spec toolchain(t()) -> binary() | undefined.
@@ -75,6 +98,30 @@ target(#opts{target = Target}) ->
 target_dir(#opts{target_dir = TargetDir}) ->
     TargetDir.
 
--spec target_dir(t(), binary()) -> t().
+-spec target_dir(t(), binary() | undefined) -> t().
 target_dir(O, TargetDir) ->
     O#opts{target_dir = TargetDir}.
+
+-spec path(t(), file:name_all()) -> t().
+path(O, Path) ->
+    O#opts{path = Path}.
+
+-spec features(t()) -> [binary()].
+features(#opts{features = Value}) ->
+    Value.
+
+-spec default_features(t()) -> boolean().
+default_features(#opts{default_features = Value}) ->
+    Value.
+
+-spec library_types(t()) -> [binary()].
+library_types(#opts{library_types = Value}) ->
+    Value.
+
+-spec env(t()) -> [{string(), string() | false}].
+env(#opts{env = Value}) ->
+    Value.
+
+-spec rustflags(t()) -> [binary()] | undefined.
+rustflags(#opts{rustflags = Value}) ->
+    Value.

@@ -2,6 +2,7 @@
 
 -export([
     run/2,
+    run_executable/3,
     run_with_flags/3
 ]).
 
@@ -19,33 +20,48 @@
 -define(MAX_LINE_LENGTH, 16384).
 -endif.
 
--spec run_with_flags(cargo_opts:t(), iolist(), [iolist()]) -> output().
+-spec run_with_flags(cargo_opts:t(), iodata(), [iodata()]) -> output().
 run_with_flags(Opts, Cmd, Flags) ->
-    Inserts =
-        lists:foldl(
-            fun
-                ({release, true}, Acc) ->
-                    ["--release" | Acc];
-                ({target, Target}, Acc) when is_binary(Target) ->
-                    [io_lib:format("--target=~s", [Target]) | Acc];
-                ({target_dir, TargetDir}, Acc) when is_binary(TargetDir) ->
-                    [io_lib:format("--target-dir=~s", [TargetDir]) | Acc];
-                (_, Acc) ->
-                    Acc
-            end,
-            [],
-            [
-                {release, cargo_opts:release(Opts)},
-                {target, cargo_opts:target(Opts)},
-                {target_dir, cargo_opts:target_dir(Opts)}
-            ]
-        ),
+    Inserts = lists:flatmap(fun flag/1, command_options(Opts, Cmd)),
 
     Cmd1 = [Cmd] ++ Inserts ++ Flags,
 
     run(Opts, Cmd1).
 
--spec run(cargo_opts:t(), [iolist()]) -> output().
+command_options(Opts, Cmd0) ->
+    Cmd = binary_to_list(cargo_util:ensure_binary(Cmd0)),
+    Common = [
+        {target, cargo_opts:target(Opts)},
+        {target_dir, cargo_opts:target_dir(Opts)},
+        {release, cargo_opts:release(Opts)}
+    ],
+    Features = [
+        {features, cargo_opts:features(Opts)},
+        {default_features, cargo_opts:default_features(Opts)}
+    ],
+    case Cmd of
+        "metadata" ->
+            [{filter_platform, cargo_opts:target(Opts)} | Features];
+        "clean" ->
+            Common;
+        _ ->
+            Common ++ Features
+    end.
+
+flag({release, true}) ->
+    ["--release"];
+flag({default_features, false}) ->
+    ["--no-default-features"];
+flag({features, [_ | _] = Features}) ->
+    ["--features", lists:join(",", Features)];
+flag({Name, Value}) when is_binary(Value) ->
+    Flags = #{target => "--target", target_dir => "--target-dir",
+              filter_platform => "--filter-platform"},
+    [maps:get(Name, Flags), Value];
+flag(_) ->
+    [].
+
+-spec run(cargo_opts:t(), [iodata()]) -> output().
 run(Opts, Args) ->
     C0 = ["cargo"],
     C1 =
@@ -56,18 +72,29 @@ run(Opts, Args) ->
                 C0 ++ [io_lib:format("+~s", [Toolchain])]
         end,
 
-    Cmd = lists:flatten(
-        lists:join(
-            " ",
-            [binary_to_list(cargo_util:ensure_binary(I)) || I <- C1 ++ Args]
-        )
-    ),
+    exec(C1 ++ Args, cargo_opts:path(Opts), command_env(Opts)).
 
-    exec(Cmd, cargo_opts:path(Opts)).
+%% Use the same streaming decoder, environment and platform execution path for
+%% companion build tools emitting Cargo-compatible JSON messages.
+-spec run_executable(cargo_opts:t(), file:filename_all(), [iodata()]) -> output().
+run_executable(Opts, Executable, Args) ->
+    exec([binary_to_list(cargo_util:ensure_binary(Executable)) | Args],
+         cargo_opts:path(Opts), command_env(Opts)).
+
+command_env(Opts) ->
+    Env = cargo_opts:env(Opts),
+    case cargo_opts:rustflags(Opts) of
+        undefined ->
+            Env;
+        Flags ->
+            [{"CARGO_ENCODED_RUSTFLAGS", binary_to_list(iolist_to_binary(
+                lists:join([31], Flags)))} |
+             lists:keydelete("CARGO_ENCODED_RUSTFLAGS", 1, Env)]
+    end.
 
 % Code derived from rebar3
--spec exec(string(), file:filename_all()) -> output().
-exec(Command, Path) ->
+-spec exec([iodata()], file:filename_all(), [{string(), string() | false}]) -> output().
+exec([Cargo | Args], Path, Env) ->
     Options1 = [
         in,
         binary,
@@ -76,11 +103,36 @@ exec(Command, Path) ->
         {line, ?MAX_LINE_LENGTH},
         use_stdio,
         hide,
-        eof
+        eof,
+        {env, Env}
     ],
 
-    Command1 = lists:flatten(patch_on_windows(Command)),
-    Port = open_port({spawn, Command1}, Options1),
+    {Command, Options2} = case os:type() of
+        {win32, nt} ->
+            % Keep the established cmd.exe compatibility path unchanged.
+            Cmd = lists:flatten(lists:join(" ", [
+                binary_to_list(cargo_util:ensure_binary(A)) || A <- [Cargo | Args]
+            ])),
+            Command1 = lists:flatten(patch_on_windows(Cmd)),
+            {{spawn, Command1}, Options1};
+        _ ->
+            Found = case proplists:get_value("PATH", Env) of
+                SearchPath when is_list(SearchPath) ->
+                    os:find_executable(Cargo, SearchPath);
+                _ ->
+                    os:find_executable(Cargo)
+            end,
+            Executable = case Found of
+                false ->
+                    error({cargo_not_found, Cargo});
+                _ ->
+                    Found
+            end,
+            {{spawn_executable, Executable}, [{args, [
+                binary_to_list(cargo_util:ensure_binary(A)) || A <- Args
+            ]} | Options1]}
+    end,
+    Port = open_port(Command, Options2),
 
     try
         case loop(Port, []) of

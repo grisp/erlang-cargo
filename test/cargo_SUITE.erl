@@ -10,7 +10,8 @@ all() ->
         simple_lib,
         multiple_bins,
         package,
-        custom_target_bin
+        custom_target_bin,
+        configured_lib
     ].
 
 
@@ -91,6 +92,20 @@ custom_target_bin(Config) ->
     clean(C, [Artifact]),
     ok.
 
+
+configured_lib(Config) ->
+    C = cargo:init(?config(crate_path, Config), #{
+        features => [<<"selected">>],
+        default_features => false,
+        rustflags => [<<"--cfg">>, <<"cargo_configured">>],
+        env => [{"CARGO_TEST_VALUE", "configured value"}]
+    }),
+    [Artifact] = cargo:build_all(C),
+    basic_tests(<<"configured_lib">>, <<"0.1.0">>, Artifact),
+    ?assertMatch(staticlib, cargo_artifact:kind(Artifact)),
+    cargo:test_all(C),
+    clean(C, [Artifact]),
+    ok.
 
 init_per_testcase(Name, Config) ->
     DataDir = ?config(data_dir, Config),

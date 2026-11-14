@@ -78,7 +78,9 @@ clean(Opts) ->
     ),
     ok.
 
--spec get_package_versions(cargo_opts:t()) -> #{atom() => _}.
+-spec get_package_versions(cargo_opts:t()) -> #{
+    binary() => #{name := binary(), version := binary()}
+}.
 get_package_versions(Opts) ->
     #{<<"packages">> := Packages} = metadata(Opts),
     maps:from_list([

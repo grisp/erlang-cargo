@@ -24,7 +24,7 @@
     executable :: binary() | undefined
 }).
 
--type kind() :: bin | cdylib | other.
+-type kind() :: bin | cdylib | staticlib | other.
 
 -opaque t() :: #artifact{}.
 
@@ -82,4 +82,5 @@ executable(#artifact{executable = E}) -> E.
 
 kind_to_atom([<<"bin">>]) -> bin;
 kind_to_atom([<<"cdylib">>]) -> cdylib;
+kind_to_atom([<<"staticlib">>]) -> staticlib;
 kind_to_atom(_) -> other.
